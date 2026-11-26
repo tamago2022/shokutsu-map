@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>食通グルメマップ（試作）</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<style>
+  :root {
+    --bg: #1c1917;
+    --panel: #292524;
+    --ink: #fafaf9;
+    --muted: #a8a29e;
+    --accent: #ea580c;
+    --accent2: #fbbf24;
+    --chip: #44403c;
+    --chip-on: #ea580c;
+    --ok: #16a34a;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; font-family: "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif; background: var(--bg); color: var(--ink); }
+  #app { display: flex; flex-direction: column; height: 100%; height: 100dvh; }
+  header {
+    flex: 0 0 auto;
+    padding: 10px 14px 8px;
+    background: var(--bg);
+  }
+  header h1 { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: .02em; }
+  header p { margin: 2px 0 0; font-size: 11px; color: var(--muted); }
+  #count { color: var(--accent2); font-weight: 700; }
+  #filters {
+    flex: 0 0 auto;
+    padding: 0 12px 8px;
+    background: var(--bg);
+    overflow-x: hidden;
+  }
+  .row { margin-top: 6px; }
+  .label { font-size: 10px; color: var(--muted); margin-bottom: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip {
+    appearance: none; border: 0; border-radius: 999px;
+    background: var(--chip); color: var(--ink);
+    font-size: 12px; padding: 6px 10px; line-height: 1.2;
+    font-weight: 600;
+  }
+  .chip.on { background: var(--chip-on); color: #fff; }
+  .chip.ghost.on { background: #57534e; }
+  #map { flex: 1 1 auto; width: 100%; min-height: 200px; }
+  .leaflet-popup-content-wrapper { border-radius: 12px; }
+  .leaflet-popup-content { margin: 12px 14px; min-width: 200px; max-width: 260px; }
+  .pop h2 { margin: 0 0 6px; font-size: 16px; line-height: 1.3; }
+  .pop .meta { font-size: 12px; color: #444; margin: 0 0 6px; }
+  .pop .memo { font-size: 13px; line-height: 1.5; margin: 0 0 10px; }
+  .pop .btns { display: flex; flex-direction: column; gap: 6px; }
+  .pop a.btn {
+    display: block; text-align: center; text-decoration: none;
+    background: #ea580c; color: #fff; border-radius: 8px;
+    padding: 8px 10px; font-size: 13px; font-weight: 700;
+  }
+  .pop a.btn.sub { background: #1c1917; }
+  .legend {
+    position: absolute; right: 10px; bottom: 22px; z-index: 500;
+    background: rgba(28,25,23,.9); color: #fff; font-size: 11px;
+    padding: 6px 8px; border-radius: 8px; pointer-events: none;
+  }
+  .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>食通グルメマップ（試作）</h1>
+    <p>最初は <b>8,000円以内</b> の店だけ表示。<span id="count"></span></p>
+  </header>
+  <div id="filters">
+    <div class="row">
+      <div class="label">予算</div>
+      <div class="chips" id="budget-chips"></div>
+    </div>
+    <div class="row">
+      <div class="label">食通</div>
+      <div class="chips" id="foodie-chips"></div>
+    </div>
+    <div class="row">
+      <div class="label">ジャンル</div>
+      <div class="chips" id="genre-chips"></div>
+    </div>
+    <div class="row">
+      <div class="label">エリア</div>
+      <div class="chips" id="area-chips"></div>
+    </div>
+  </div>
+  <div id="map"></div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+const SHOPS = [{"店名": "数寄や とっととやれや 総曲輪店", "住所": "富山県富山市一番町3-8", "食通": "河瀬璃菜（りな助）", "ジャンル": "寿司", "料理メモ": "総曲輪の寿司ランチ。本マグロ、氷見ブリ、新湊の白エビ、紅ズワイ、ノドグロ入りのセットが3,000円。夜は高めの可能性あり。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2117135942784028757", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E6%95%B0%E5%AF%84%E3%82%84%20%E3%81%A8%E3%81%A3%E3%81%A8%E3%81%A8%E3%82%84%E3%82%8C%E3%82%84%20%E7%B7%8F%E6%9B%B2%E8%BC%AA%E5%BA%97%20%E5%AF%8C%E5%B1%B1%E7%9C%8C%E5%AF%8C%E5%B1%B1%E5%B8%82%E4%B8%80%E7%95%AA%E7%94%BA3-8", "緯度": 36.688618, "経度": 137.212997, "予算帯": "〜5000円", "エリア": "富山・総曲輪", "予算詳細": "紹介は寿司ランチ3,000円。食べログ掲載ランチは約2,000〜2,999円。夜は1万円前後の言及あり"}, {"店名": "食堂 ひと煮たち", "住所": "福岡県福岡市中央区渡辺通5-5-5", "食通": "河瀬璃菜（りな助）", "ジャンル": "食堂", "料理メモ": "天神南の朝ごはん食堂。丁寧な煮魚と炊きたてご飯。朝食・昼食専門。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2115301956000612388", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E9%A3%9F%E5%A0%82%20%E3%81%B2%E3%81%A8%E7%85%AE%E3%81%9F%E3%81%A1%20%E7%A6%8F%E5%B2%A1%E7%9C%8C%E7%A6%8F%E5%B2%A1%E5%B8%82%E4%B8%AD%E5%A4%AE%E5%8C%BA%E6%B8%A1%E8%BE%BA%E9%80%9A5-5-5", "緯度": 33.587395, "経度": 130.404602, "予算帯": "〜5000円", "エリア": "福岡・天神南", "予算詳細": "食べログ口コミ集計 2,000〜2,999円。定食は約1,600〜3,800円"}, {"店名": "代官山のんき", "住所": "東京都渋谷区代官山町8-15 DIビル1F", "食通": "河瀬璃菜（りな助）", "ジャンル": "居酒屋", "料理メモ": "代官山では貴重な気軽な居酒屋。名物のしろたれは外カリ中トロ。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2112472246963118397", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E4%BB%A3%E5%AE%98%E5%B1%B1%E3%81%AE%E3%82%93%E3%81%8D%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%B8%8B%E8%B0%B7%E5%8C%BA%E4%BB%A3%E5%AE%98%E5%B1%B1%E7%94%BA8-15%20DI%E3%83%93%E3%83%AB1F", "緯度": 35.652, "経度": 139.705139, "予算帯": "5000〜8000円", "エリア": "代官山", "予算詳細": "食べログ掲載 5,000〜5,999円"}, {"店名": "イマサラガラムマサラ", "住所": "東京都杉並区西荻北3-22-22 第7フロントビル", "食通": "河瀬璃菜（りな助）", "ジャンル": "カレー・寿司", "料理メモ": "西荻窪。美味い握りのあとにスパイスカレーで締める、寿司とカレーの店。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2112105956519932281", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%82%A4%E3%83%9E%E3%82%B5%E3%83%A9%E3%82%AC%E3%83%A9%E3%83%A0%E3%83%9E%E3%82%B5%E3%83%A9%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%9D%89%E4%B8%A6%E5%8C%BA%E8%A5%BF%E8%8D%BB%E5%8C%973-22-22%20%E7%AC%AC7%E3%83%95%E3%83%AD%E3%83%B3%E3%83%88%E3%83%93%E3%83%AB", "緯度": 35.704807, "経度": 139.599991, "予算帯": "5000〜8000円", "エリア": "西荻窪", "予算詳細": "食べログ掲載は1,000〜1,999円（カレー中心）。寿司併用の口コミ集計は夜6,000〜7,999円。吉祥寺から西荻窪へ移転済み"}, {"店名": "炭火焼肉ホルモン うらら", "住所": "神奈川県横浜市青葉区美しが丘2-17-40", "食通": "河瀬璃菜（りな助）", "ジャンル": "焼肉", "料理メモ": "たまプラーザの焼肉。親しみやすい価格帯で、黒毛和牛のタンや仕込みのホルモンが良いとの紹介。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2110693797135024518", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E7%82%AD%E7%81%AB%E7%84%BC%E8%82%89%E3%83%9B%E3%83%AB%E3%83%A2%E3%83%B3%20%E3%81%86%E3%82%89%E3%82%89%20%E7%A5%9E%E5%A5%88%E5%B7%9D%E7%9C%8C%E6%A8%AA%E6%B5%9C%E5%B8%82%E9%9D%92%E8%91%89%E5%8C%BA%E7%BE%8E%E3%81%97%E3%81%8C%E4%B8%982-17-40", "緯度": 35.58012, "経度": 139.55925, "予算帯": "5000〜8000円", "エリア": "たまプラーザ", "予算詳細": "食べログ掲載ディナー約5,000〜5,999円"}, {"店名": "ロシータ", "住所": "福岡県福岡市博多区中洲2-1-15", "食通": "河瀬璃菜（りな助）", "ジャンル": "メキシコ料理", "料理メモ": "日本最古級のメキシコ料理店。パリッと揚げた生地にシンプルな具とサルサの、福岡のオールドスクールタコス。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2102714913559028028", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%83%AD%E3%82%B7%E3%83%BC%E3%82%BF%20%E7%A6%8F%E5%B2%A1%E7%9C%8C%E7%A6%8F%E5%B2%A1%E5%B8%82%E5%8D%9A%E5%A4%9A%E5%8C%BA%E4%B8%AD%E6%B4%B22-1-15", "緯度": 33.592079, "経度": 130.409561, "予算帯": "〜5000円", "エリア": "福岡・中洲", "予算詳細": "食べログ口コミ集計 2,000〜2,999円。タコス約1,200円"}, {"店名": "コットン・フィールズ", "住所": "福岡県福岡市博多区中洲4-2-15 メインストリートビルB1F", "食通": "河瀬璃菜（りな助）", "ジャンル": "バー・タコス", "料理メモ": "中洲の老舗バー。ロシータと並んで、福岡独自のオールドスクールタコスが食べられると紹介。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2102714913559028028", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%82%B3%E3%83%83%E3%83%88%E3%83%B3%E3%83%BB%E3%83%95%E3%82%A3%E3%83%BC%E3%83%AB%E3%82%BA%20%E7%A6%8F%E5%B2%A1%E7%9C%8C%E7%A6%8F%E5%B2%A1%E5%B8%82%E5%8D%9A%E5%A4%9A%E5%8C%BA%E4%B8%AD%E6%B4%B24-2-15%20%E3%83%A1%E3%82%A4%E3%83%B3%E3%82%B9%E3%83%88%E3%83%AA%E3%83%BC%E3%83%88%E3%83%93%E3%83%ABB1F", "緯度": 33.592541, "経度": 130.407043, "予算帯": "〜5000円", "エリア": "福岡・中洲", "予算詳細": "食べログ掲載 2,000〜2,999円"}, {"店名": "地鶏食堂 曲渕店", "住所": "福岡県福岡市早良区大字曲渕739-4", "食通": "河瀬璃菜（りな助）", "ジャンル": "鳥料理・定食", "料理メモ": "福岡の山奥の地鶏食堂。親鳥・種鶏の旨味と歯ごたえ。煙モクモクの中で食べるワイルドな店、と紹介。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2102226878312722804", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E5%9C%B0%E9%B6%8F%E9%A3%9F%E5%A0%82%20%E6%9B%B2%E6%B8%95%E5%BA%97%20%E7%A6%8F%E5%B2%A1%E7%9C%8C%E7%A6%8F%E5%B2%A1%E5%B8%82%E6%97%A9%E8%89%AF%E5%8C%BA%E5%A4%A7%E5%AD%97%E6%9B%B2%E6%B8%95739-4", "緯度": 33.495369, "経度": 130.298462, "予算帯": "〜5000円", "エリア": "福岡・曲渕", "予算詳細": "食べログ掲載 1,000〜1,999円、口コミ集計 2,000〜2,999円。ランチ定食約1,500〜1,800円"}, {"店名": "てら屋", "住所": "東京都世田谷区祖師谷4-1-21 Esperanza 1F", "食通": "河瀬璃菜（りな助）", "ジャンル": "炭火焼酒場", "料理メモ": "祖師ヶ谷大蔵の炭火焼酒場。元・西麻布のイタリアンシェフ。炭火焼き肉やカラスミパスタを紹介。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2108836040106709029", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%81%A6%E3%82%89%E5%B1%8B%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E4%B8%96%E7%94%B0%E8%B0%B7%E5%8C%BA%E7%A5%96%E5%B8%AB%E8%B0%B74-1-21%20Esperanza%201F", "緯度": 35.647247, "経度": 139.608398, "予算帯": "不明", "エリア": "祖師ヶ谷大蔵", "予算詳細": "食べログ掲載は4,000〜4,999円、口コミ集計は8,000〜9,999円で差が大きい"}, {"店名": "NORCINA（ノルチーナ）", "住所": "東京都渋谷区広尾5-1-30", "食通": "河瀬璃菜（りな助）", "ジャンル": "イタリアン", "料理メモ": "名店メログラーノの系列店。アラカルトのパスタやワイン、二軒目使いも歓迎。遅い時間も。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2125504819012235634", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=NORCINA%EF%BC%88%E3%83%8E%E3%83%AB%E3%83%81%E3%83%BC%E3%83%8A%EF%BC%89%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%B8%8B%E8%B0%B7%E5%8C%BA%E5%BA%83%E5%B0%BE5-1-30", "緯度": 35.649227, "経度": 139.719391, "予算帯": "8000円超", "エリア": "広尾", "予算詳細": "食べログ掲載 10,000〜14,999円（別途サービス料10%）"}, {"店名": "蓮", "住所": "東京都港区西麻布4-4-9 麻布ミヤハウス B1F", "食通": "河瀬璃菜（りな助）", "ジャンル": "中華", "料理メモ": "西麻布。石巻の生産者の食材を使った11月限定の特別コースを紹介（ホヤ、メヌケ、海藻など）。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2123323528468713771", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E8%93%AE%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%B8%AF%E5%8C%BA%E8%A5%BF%E9%BA%BB%E5%B8%834-4-9%20%E9%BA%BB%E5%B8%83%E3%83%9F%E3%83%A4%E3%83%8F%E3%82%A6%E3%82%B9%20B1F", "緯度": 35.657246, "経度": 139.723511, "予算帯": "8000円超", "エリア": "西麻布", "予算詳細": "食べログ掲載 ランチ10,000〜14,999円、ディナー20,000〜29,999円"}, {"店名": "里葉亭", "住所": "神奈川県横浜市中区福富町仲通3-2 井上共同ビル1F", "食通": "河瀬璃菜（りな助）", "ジャンル": "焼き鳥", "料理メモ": "横浜・野毛の焼き鳥名店。胸の皮を使ったかわ串が、噛んだ瞬間の肉厚な食感で旨いと紹介。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2109930925194895718", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E9%87%8C%E8%91%89%E4%BA%AD%20%E7%A5%9E%E5%A5%88%E5%B7%9D%E7%9C%8C%E6%A8%AA%E6%B5%9C%E5%B8%82%E4%B8%AD%E5%8C%BA%E7%A6%8F%E5%AF%8C%E7%94%BA%E4%BB%B2%E9%80%9A3-2%20%E4%BA%95%E4%B8%8A%E5%85%B1%E5%90%8C%E3%83%93%E3%83%AB1F", "緯度": 35.445412, "経度": 139.631256, "予算帯": "8000円超", "エリア": "横浜・野毛", "予算詳細": "食べログ掲載 10,000〜14,999円"}, {"店名": "日本橋蛎殻町 すぎた", "住所": "東京都中央区日本橋蛎殻町1-33-6 ビューハイツ日本橋B1F", "食通": "河瀬璃菜（りな助）", "ジャンル": "寿司", "料理メモ": "蛎殻町の寿司。大将の人柄と仕事ぶりを愛する客を大切にする店、として紹介。知っておく用の高額店。", "SNS投稿URL": "https://x.com/Linasuke0508/status/2106312410147824046", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E6%97%A5%E6%9C%AC%E6%A9%8B%E8%9B%8E%E6%AE%BB%E7%94%BA%20%E3%81%99%E3%81%8E%E3%81%9F%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E4%B8%AD%E5%A4%AE%E5%8C%BA%E6%97%A5%E6%9C%AC%E6%A9%8B%E8%9B%8E%E6%AE%BB%E7%94%BA1-33-6%20%E3%83%93%E3%83%A5%E3%83%BC%E3%83%8F%E3%82%A4%E3%83%84%E6%97%A5%E6%9C%AC%E6%A9%8BB1F", "緯度": 35.681984, "経度": 139.785034, "予算帯": "8000円超", "エリア": "日本橋蛎殻町", "予算詳細": "食べログ掲載 40,000〜49,999円。おまかせコース49,500円＋サービス料10%"}, {"店名": "いっちゃが 横浜関内店", "住所": "神奈川県横浜市中区相生町1-18-1 TSKビル B1F", "食通": "うどんが主食", "ジャンル": "郷土料理", "料理メモ": "関内北口の宮崎郷土料理。本格的なチキン南蛮に芋焼酎。投稿では「うどんが主食の記事を読んだ」でドリンク1杯サービスとのこと（実施は店に要確認）。", "SNS投稿URL": "https://x.com/alwaysudon/status/2112701371883602428", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%81%84%E3%81%A3%E3%81%A1%E3%82%83%E3%81%8C%20%E6%A8%AA%E6%B5%9C%E9%96%A2%E5%86%85%E5%BA%97%20%E7%A5%9E%E5%A5%88%E5%B7%9D%E7%9C%8C%E6%A8%AA%E6%B5%9C%E5%B8%82%E4%B8%AD%E5%8C%BA%E7%9B%B8%E7%94%9F%E7%94%BA1-18-1%20TSK%E3%83%93%E3%83%AB%20B1F", "緯度": 35.445724, "経度": 139.639542, "予算帯": "〜5000円", "エリア": "横浜・関内", "予算詳細": "食べログ掲載・口コミ集計とも 3,000〜3,999円。飲み放題付コースは4,500〜6,000円"}, {"店名": "自家製麺 うるち", "住所": "東京都台東区寿2-9-16 ワールドマンション田原町101", "食通": "うどんが主食", "ジャンル": "ラーメン", "料理メモ": "田原町の自家製麺ラーメン。隣のみつヰに並びきれず入ったところ、想像以上に旨かった、という紹介。", "SNS投稿URL": "https://x.com/alwaysudon/status/2060865804988748089", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E8%87%AA%E5%AE%B6%E8%A3%BD%E9%BA%BA%20%E3%81%86%E3%82%8B%E3%81%A1%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%8F%B0%E6%9D%B1%E5%8C%BA%E5%AF%BF2-9-16%20%E3%83%AF%E3%83%BC%E3%83%AB%E3%83%89%E3%83%9E%E3%83%B3%E3%82%B7%E3%83%A7%E3%83%B3%E7%94%B0%E5%8E%9F%E7%94%BA101", "緯度": 35.709389, "経度": 139.790344, "予算帯": "〜5000円", "エリア": "田原町", "予算詳細": "食べログ掲載 1,000〜1,999円"}, {"店名": "あざぶ家", "住所": "東京都港区西麻布1-12-5 SW六本木通りビル1F", "食通": "うどんが主食", "ジャンル": "ラーメン", "料理メモ": "西麻布の家系ラーメン。『三浦家』を継承した話題店として紹介。", "SNS投稿URL": "https://x.com/alwaysudon/status/2094926646486958531", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%81%82%E3%81%96%E3%81%B6%E5%AE%B6%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%B8%AF%E5%8C%BA%E8%A5%BF%E9%BA%BB%E5%B8%831-12-5%20SW%E5%85%AD%E6%9C%AC%E6%9C%A8%E9%80%9A%E3%82%8A%E3%83%93%E3%83%AB1F", "緯度": 35.660233, "経度": 139.723923, "予算帯": "〜5000円", "エリア": "西麻布", "予算詳細": "食べログ掲載 1,000〜1,999円"}, {"店名": "とんこつ みうら", "住所": "東京都葛飾区金町6-5-1 ベルトーレ金町1F", "食通": "うどんが主食", "ジャンル": "ラーメン", "料理メモ": "金町。三浦家の大将がいないときの屋号が「とんこつみうら」。家系ラーメンで三浦家に引けを取らない、と紹介。", "SNS投稿URL": "https://x.com/alwaysudon/status/2015555830985502917", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%81%A8%E3%82%93%E3%81%93%E3%81%A4%20%E3%81%BF%E3%81%86%E3%82%89%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E8%91%9B%E9%A3%BE%E5%8C%BA%E9%87%91%E7%94%BA6-5-1%20%E3%83%99%E3%83%AB%E3%83%88%E3%83%BC%E3%83%AC%E9%87%91%E7%94%BA1F", "緯度": 35.768497, "経度": 139.871109, "予算帯": "〜5000円", "エリア": "金町", "予算詳細": "食べログ掲載 1,000〜1,999円（三浦家と同じ建物）"}, {"店名": "菜香", "住所": "東京都目黒区中町2-38-2", "食通": "うどんが主食", "ジャンル": "中華", "料理メモ": "祐天寺の中華。トマトと玉子炒め、黒酢酢豚、麻婆茄子など。12年ぶりに再訪して「店の中だけ10年前の値段」と紹介。", "SNS投稿URL": "https://x.com/alwaysudon/status/2090966988579623375", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E8%8F%9C%E9%A6%99%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E7%9B%AE%E9%BB%92%E5%8C%BA%E4%B8%AD%E7%94%BA2-38-2", "緯度": 35.635525, "経度": 139.693344, "予算帯": "〜5000円", "エリア": "祐天寺", "予算詳細": "食べログ掲載 3,000〜3,999円。投稿では4人で酒2本込み36,000円（1人約9,000円）の例もあり"}, {"店名": "スタミナ苑（鹿浜）", "住所": "東京都足立区鹿浜3-13-4", "食通": "うどんが主食", "ジャンル": "焼肉", "料理メモ": "西新井大師西の老舗焼肉。何年ぶりかの再訪でも「スタミナ苑は永遠」と紹介。", "SNS投稿URL": "https://x.com/alwaysudon/status/2059063617417576661", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%82%B9%E3%82%BF%E3%83%9F%E3%83%8A%E8%8B%91%EF%BC%88%E9%B9%BF%E6%B5%9C%EF%BC%89%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E8%B6%B3%E7%AB%8B%E5%8C%BA%E9%B9%BF%E6%B5%9C3-13-4", "緯度": 35.779881, "経度": 139.752426, "予算帯": "5000〜8000円", "エリア": "西新井", "予算詳細": "食べログ掲載 6,000〜7,999円。口コミ集計は10,000〜14,999円と高め"}, {"店名": "手打蕎麦 松竹庵 ます川", "住所": "東京都千代田区神田淡路町2-6", "食通": "うどんが主食", "ジャンル": "そば", "料理メモ": "天保元年創業の手打蕎麦。蕎麦も料理も天ぷらも旨い、昼の紹介。夜のコースは高め。", "SNS投稿URL": "https://x.com/alwaysudon/status/2038048978135347405", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E6%89%8B%E6%89%93%E8%95%8E%E9%BA%A6%20%E6%9D%BE%E7%AB%B9%E5%BA%B5%20%E3%81%BE%E3%81%99%E5%B7%9D%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%8D%83%E4%BB%A3%E7%94%B0%E5%8C%BA%E7%A5%9E%E7%94%B0%E6%B7%A1%E8%B7%AF%E7%94%BA2-6", "緯度": 35.696877, "経度": 139.768066, "予算帯": "5000〜8000円", "エリア": "神田淡路町", "予算詳細": "ランチコース約5,720〜7,150円（サービス料5%）。夜のおまかせ天ぷらコースは17,600円と高額"}, {"店名": "揚雫（ヨウダ）", "住所": "神奈川県横浜市中区山下町25-16 ニューポートビル101", "食通": "うどんが主食", "ジャンル": "とんかつ", "料理メモ": "横浜のとんかつ。「名ばかりのとんかつ屋は道を空ける」と激賞。予約が取りにくい可能性あり。", "SNS投稿URL": "https://x.com/alwaysudon/status/2063358430879060068", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E6%8F%9A%E9%9B%AB%EF%BC%88%E3%83%A8%E3%82%A6%E3%83%80%EF%BC%89%20%E7%A5%9E%E5%A5%88%E5%B7%9D%E7%9C%8C%E6%A8%AA%E6%B5%9C%E5%B8%82%E4%B8%AD%E5%8C%BA%E5%B1%B1%E4%B8%8B%E7%94%BA25-16%20%E3%83%8B%E3%83%A5%E3%83%BC%E3%83%9D%E3%83%BC%E3%83%88%E3%83%93%E3%83%AB101", "緯度": 35.445782, "経度": 139.646591, "予算帯": "8000円超", "エリア": "横浜・日本大通り", "予算詳細": "投稿時点の記載は6,000〜7,999円。現行の食べログ掲載は10,000〜14,999円、定食9,900円との情報あり"}, {"店名": "東京園", "住所": "東京都中央区銀座5-9-5", "食通": "うどんが主食", "ジャンル": "焼肉", "料理メモ": "銀座の庶民派焼肉、と紹介（タン塩、ハラミなど）。予約困難店。現行掲載は8000円超。", "SNS投稿URL": "https://x.com/alwaysudon/status/2043089150912733389", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E6%9D%B1%E4%BA%AC%E5%9C%92%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E4%B8%AD%E5%A4%AE%E5%8C%BA%E9%8A%80%E5%BA%A75-9-5", "緯度": 35.670235, "経度": 139.765701, "予算帯": "8000円超", "エリア": "銀座", "予算詳細": "投稿内の記載は6,000〜7,999円。現行の食べログ掲載は8,000〜9,999円"}, {"店名": "fragment 麻布十番", "住所": "東京都港区麻布十番3-9-2 タモン麻布2F", "食通": "うどんが主食", "ジャンル": "イタリアン", "料理メモ": "麻布十番のカウンターイタリアン。若いシェフとソムリエを評価。夜は高額帯のため初期表示からは外す。", "SNS投稿URL": "https://x.com/alwaysudon/status/2060103190167871612", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=fragment%20%E9%BA%BB%E5%B8%83%E5%8D%81%E7%95%AA%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%B8%AF%E5%8C%BA%E9%BA%BB%E5%B8%83%E5%8D%81%E7%95%AA3-9-2%20%E3%82%BF%E3%83%A2%E3%83%B3%E9%BA%BB%E5%B8%832F", "緯度": 35.652752, "経度": 139.734039, "予算帯": "8000円超", "エリア": "麻布十番", "予算詳細": "食べログ掲載 昼3,000〜3,999円、夜15,000〜19,999円。投稿では「激安・絶品カウンターイタリアン」とあるが、夜の現行掲載は高め"}, {"店名": "Cafe de Voila", "住所": "兵庫県宝塚市武庫川町2-10 NTTビル1F", "食通": "ミスター黒猫", "ジャンル": "カフェ", "料理メモ": "宝塚大劇場そばのパンケーキ専門店。元タカラジェンヌが焼くパンケーキと、公演をイメージした限定メニューを紹介。", "SNS投稿URL": "https://x.com/mr_kuronekocafe/status/2121449948663484560", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=Cafe%20de%20Voila%20%E5%85%B5%E5%BA%AB%E7%9C%8C%E5%AE%9D%E5%A1%9A%E5%B8%82%E6%AD%A6%E5%BA%AB%E5%B7%9D%E7%94%BA2-10%20NTT%E3%83%93%E3%83%AB1F", "緯度": 34.807064, "経度": 135.347916, "予算帯": "〜5000円", "エリア": "宝塚", "予算詳細": "食べログ掲載 2,000〜2,999円（ランチ1,000〜1,999円）。パンケーキは約1,700〜2,000円"}, {"店名": "カフェ＆レストラン ランドマーク", "住所": "東京都中央区日本橋室町1-4-1 日本橋三越新館5F", "食通": "ミスター黒猫", "ジャンル": "カフェ", "料理メモ": "日本橋三越新館のカフェ＆レストラン。ドリンクバー付きの三越食堂で、メロンクリームソーダと固めプリンを紹介。", "SNS投稿URL": "https://x.com/mr_kuronekocafe/status/2031928038481613077", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%82%AB%E3%83%95%E3%82%A7%EF%BC%86%E3%83%AC%E3%82%B9%E3%83%88%E3%83%A9%E3%83%B3%20%E3%83%A9%E3%83%B3%E3%83%89%E3%83%9E%E3%83%BC%E3%82%AF%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E4%B8%AD%E5%A4%AE%E5%8C%BA%E6%97%A5%E6%9C%AC%E6%A9%8B%E5%AE%A4%E7%94%BA1-4-1%20%E6%97%A5%E6%9C%AC%E6%A9%8B%E4%B8%89%E8%B6%8A%E6%96%B0%E9%A4%A85F", "緯度": 35.685177, "経度": 139.77298, "予算帯": "〜5000円", "エリア": "日本橋", "予算詳細": "食べログ掲載 1,000〜1,999円、公式平均ランチ約1,800円。投稿の大人様洋食は4,280円"}, {"店名": "アフタヌーンティー・ラブアンドテーブル 表参道", "住所": "東京都渋谷区神宮前4-3-2", "食通": "ミスター黒猫", "ジャンル": "スイーツ", "料理メモ": "表参道のカフェ。行列のできるあまおう苺のミルクレープを紹介（期間限定メニューの可能性あり）。", "SNS投稿URL": "https://x.com/mr_kuronekocafe/status/2029904196758294666", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%82%A2%E3%83%95%E3%82%BF%E3%83%8C%E3%83%BC%E3%83%B3%E3%83%86%E3%82%A3%E3%83%BC%E3%83%BB%E3%83%A9%E3%83%96%E3%82%A2%E3%83%B3%E3%83%89%E3%83%86%E3%83%BC%E3%83%96%E3%83%AB%20%E8%A1%A8%E5%8F%82%E9%81%93%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E6%B8%8B%E8%B0%B7%E5%8C%BA%E7%A5%9E%E5%AE%AE%E5%89%8D4-3-2", "緯度": 35.666824, "経度": 139.71109, "予算帯": "〜5000円", "エリア": "表参道", "予算詳細": "食べログ掲載 1,000〜1,999円"}, {"店名": "ランディーズドーナツ 東京ギフトパレット店", "住所": "東京都千代田区丸の内1-9-1 東京ギフトパレット1F", "食通": "ミスター黒猫", "ジャンル": "スイーツ", "料理メモ": "東京駅のロサンゼルス発ドーナツ店。手土産として紹介。", "SNS投稿URL": "https://x.com/mr_kuronekocafe/status/2020378299458081194", "GoogleマップURL": "https://www.google.com/maps/search/?api=1&query=%E3%83%A9%E3%83%B3%E3%83%87%E3%82%A3%E3%83%BC%E3%82%BA%E3%83%89%E3%83%BC%E3%83%8A%E3%83%84%20%E6%9D%B1%E4%BA%AC%E3%82%AE%E3%83%95%E3%83%88%E3%83%91%E3%83%AC%E3%83%83%E3%83%88%E5%BA%97%20%E6%9D%B1%E4%BA%AC%E9%83%BD%E5%8D%83%E4%BB%A3%E7%94%B0%E5%8C%BA%E4%B8%B8%E3%81%AE%E5%86%851-9-1%20%E6%9D%B1%E4%BA%AC%E3%82%AE%E3%83%95%E3%83%88%E3%83%91%E3%83%AC%E3%83%83%E3%83%881F", "緯度": 35.681252, "経度": 139.767242, "予算帯": "〜5000円", "エリア": "東京駅", "予算詳細": "食べログ口コミ集計は999円以下。ドーナツ1個約360〜550円"}];
+
+const BUDGETS = [
+  { id: "in8", label: "8000円以内", match: (b) => b === "〜5000円" || b === "5000〜8000円", defaultOn: true },
+  { id: "low", label: "〜5000円", match: (b) => b === "〜5000円", defaultOn: false },
+  { id: "mid", label: "5000〜8000円", match: (b) => b === "5000〜8000円", defaultOn: false },
+  { id: "high", label: "8000円超", match: (b) => b === "8000円超", defaultOn: false },
+  { id: "unk", label: "不明", match: (b) => b === "不明", defaultOn: false },
+];
+
+const COLORS = {
+  "〜5000円": "#16a34a",
+  "5000〜8000円": "#2563eb",
+  "8000円超": "#a8a29e",
+  "不明": "#a8a29e"
+};
+
+const state = {
+  budgets: new Set(BUDGETS.filter(b => b.defaultOn).map(b => b.id)),
+  foodie: "all",
+  genre: "all",
+  area: "all"
+};
+
+function unique(key) {
+  return [...new Set(SHOPS.map(s => s[key]))].sort((a,b) => a.localeCompare(b, "ja"));
+}
+
+function makeChips(el, items, current, onPick) {
+  el.innerHTML = "";
+  items.forEach(item => {
+    const btn = document.createElement("button");
+    btn.className = "chip" + (item.on ? " on" : "");
+    btn.type = "button";
+    btn.textContent = item.label;
+    btn.addEventListener("click", () => onPick(item.id));
+    el.appendChild(btn);
+  });
+}
+
+function renderFilterChips() {
+  makeChips(document.getElementById("budget-chips"),
+    BUDGETS.map(b => ({ id: b.id, label: b.label, on: state.budgets.has(b.id) })),
+    null,
+    (id) => {
+      // 8000円以内 is a combo; toggling it sets low+mid and clears high/unk
+      if (id === "in8") {
+        if (state.budgets.has("in8") && state.budgets.size === 1) {
+          // keep at least one
+        } else if (state.budgets.has("in8")) {
+          state.budgets.delete("in8");
+        } else {
+          state.budgets = new Set(["in8"]);
+        }
+      } else {
+        state.budgets.delete("in8");
+        if (state.budgets.has(id) && state.budgets.size === 1) {
+          // keep
+        } else if (state.budgets.has(id)) {
+          state.budgets.delete(id);
+        } else {
+          state.budgets.add(id);
+        }
+        if (!state.budgets.size) state.budgets.add("in8");
+      }
+      renderFilterChips();
+      applyFilter();
+    }
+  );
+
+  const foodies = ["all", ...unique("食通")];
+  makeChips(document.getElementById("foodie-chips"),
+    foodies.map(v => ({ id: v, label: v === "all" ? "全員" : v, on: state.foodie === v })),
+    state.foodie,
+    (id) => { state.foodie = id; renderFilterChips(); applyFilter(); }
+  );
+
+  const genres = ["all", ...unique("ジャンル")];
+  makeChips(document.getElementById("genre-chips"),
+    genres.map(v => ({ id: v, label: v === "all" ? "すべて" : v, on: state.genre === v })),
+    state.genre,
+    (id) => { state.genre = id; renderFilterChips(); applyFilter(); }
+  );
+
+  const areas = ["all", ...unique("エリア")];
+  makeChips(document.getElementById("area-chips"),
+    areas.map(v => ({ id: v, label: v === "all" ? "すべて" : v, on: state.area === v })),
+    state.area,
+    (id) => { state.area = id; renderFilterChips(); applyFilter(); }
+  );
+}
+
+function budgetOK(band) {
+  const active = BUDGETS.filter(b => state.budgets.has(b.id));
+  return active.some(b => b.match(band));
+}
+
+function visibleShops() {
+  return SHOPS.filter(s =>
+    s.緯度 && s.経度 &&
+    budgetOK(s.予算帯) &&
+    (state.foodie === "all" || s.食通 === state.foodie) &&
+    (state.genre === "all" || s.ジャンル === state.genre) &&
+    (state.area === "all" || s.エリア === state.area)
+  );
+}
+
+function markerIcon(band) {
+  const c = COLORS[band] || "#a8a29e";
+  return L.divIcon({
+    className: "",
+    html: `<div style="width:18px;height:18px;border-radius:50%;background:${c};border:2px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>`,
+    iconSize: [18, 18],
+    iconAnchor: [9, 9],
+    popupAnchor: [0, -10]
+  });
+}
+
+function popupHtml(s) {
+  const memo = escapeHtml(s.料理メモ);
+  const detail = s.予算詳細 ? `<div class="meta">${escapeHtml(s.予算詳細)}</div>` : "";
+  return `<div class="pop">
+    <h2>${escapeHtml(s.店名)}</h2>
+    <div class="meta">${escapeHtml(s.食通)} ／ ${escapeHtml(s.ジャンル)} ／ ${escapeHtml(s.エリア)}<br>予算：${escapeHtml(s.予算帯)}<br>${escapeHtml(s.住所)}</div>
+    ${detail}
+    <p class="memo">${memo}</p>
+    <div class="btns">
+      <a class="btn" href="${escapeAttr(s.SNS投稿URL)}" target="_blank" rel="noopener">元のSNS投稿を見る</a>
+      <a class="btn sub" href="${escapeAttr(s.GoogleマップURL)}" target="_blank" rel="noopener">Googleマップで開く</a>
+    </div>
+  </div>`;
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+const map = L.map("map", { zoomControl: true, attributionControl: true });
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap"
+}).addTo(map);
+
+const layer = L.layerGroup().addTo(map);
+let didFit = false;
+
+function applyFilter() {
+  layer.clearLayers();
+  const vis = visibleShops();
+  const bounds = [];
+  vis.forEach(s => {
+    const m = L.marker([s.緯度, s.経度], { icon: markerIcon(s.予算帯) });
+    m.bindPopup(popupHtml(s), { maxWidth: 280 });
+    m.addTo(layer);
+    bounds.push([s.緯度, s.経度]);
+  });
+  document.getElementById("count").textContent = vis.length ? `${vis.length}件表示中` : "条件に合う店がありません";
+  if (bounds.length) {
+    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 12 });
+    didFit = true;
+  } else if (!didFit) {
+    map.setView([35.68, 139.76], 5);
+  }
+}
+
+renderFilterChips();
+applyFilter();
+setTimeout(() => map.invalidateSize(), 200);
+window.addEventListener("resize", () => map.invalidateSize());
+</script>
+</body>
+</html>
